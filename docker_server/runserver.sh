@@ -3,10 +3,10 @@
 # python3 Server.py
 
 #TCP Server
-#python3 Server.py tc 1234
+#python3 -u Server.py tc 1234
 
 #UDP Server
 #python3 Server.py uc 4321
 
 #RMI Server
-python3 PyroServer.py rmic 4444
+#python3 PyroServer.py rmic 4444

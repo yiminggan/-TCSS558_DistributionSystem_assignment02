@@ -10,7 +10,7 @@ RUN pip3 install Pyro4
 COPY Server.py /
 COPY runserver.sh /
 COPY PyroServer.py /
-ENTRYPOINT ["/runserver.sh"]
-CMD ["300"]
+#ENTRYPOINT ["/runserver.sh"]
+#CMD ["300"]
 
 

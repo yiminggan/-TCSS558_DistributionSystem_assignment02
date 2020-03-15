@@ -2,3 +2,4 @@
 */.vscode
 */__pycache__
 test.cfg
+docker_server/launchDocker.sh

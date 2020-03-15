@@ -1,4 +1,5 @@
 import socketserver
+import socket
 import json
 import os
 import time
@@ -25,6 +26,7 @@ def operation(data, data_path, server):
             sock.sendall(bytes(command + "\n", "utf-8"))
             received = str(sock.recv(65100), "utf-8")
         '''
+        msg = ''
         return msg
     elif data[0] == 'get':
         try:
@@ -72,10 +74,10 @@ def operation(data, data_path, server):
         # implementation need
         return None
 
-def maintain_membership(cfg_path, server):
+def ConfigFile(path, server):
     while True:
         members = {}
-        with open(cfg_path, 'r') as f:
+        with open(path, 'r') as f:
             lines = f.readlines()
             for line in lines:
                 addr_port = line.split(':')
@@ -83,6 +85,55 @@ def maintain_membership(cfg_path, server):
             # print('main thread: {}'.format(members))
             server.members = members
         time.sleep(3)
+
+def udp_receive(send_addr):
+    while True:
+        sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sender.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        sender.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        _, port = send_addr
+        msg = str(port)
+        sender.sendto(msg.encode('utf-8'), ('<broadcast>', 4410))
+        time.sleep(0.1)
+
+def udp_check(map):
+    while True:
+        print(map)
+        for ip in list(map):
+            map[ip] -= 1
+            if map[ip] == 0:
+                map.pop(ip)
+                print('delete ip: {}'.format(ip))
+        time.sleep(1)
+
+def UdpDiscover(send_addr, server):
+    listen_thread = threading.Thread(target=udp_receive, 
+                    args=(send_addr,),
+                    daemon=True)
+    listen_thread.start()
+
+    check_thread = threading.Thread(target=udp_check, 
+                args=(server.members_udp,),
+                daemon=True)
+    check_thread.start()
+    while True:
+        listener = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        listener.bind(("",4410))
+        addr_port = listener.recvfrom(1024)
+        port, (addr, _) = addr_port
+        port = int(port)
+        #print("Udp receive addr: {}:{}".format(addr, port))
+        server.members_udp[addr] = 30
+        time.sleep(1)
+        
+def maintain_membership(com_type,server):
+    if com_type == 'udp':
+        UdpDiscover(server.server_address, server)
+    else:
+        ConfigFile(com_type, server)
+
 
 # Handler classes for TCP and UDP
 class MyTCPHandler(socketserver.BaseRequestHandler):
@@ -129,9 +180,10 @@ class MyUDPHandler(socketserver.BaseRequestHandler):
         
 # Helper class for TCP and UDP server
 class MyTcpServer(socketserver.ThreadingTCPServer):
-    members = {}
     def __init__(self, server_addr, Handler):
         socketserver.TCPServer.__init__(self, server_addr, Handler)
+        self.members = []
+        self.members_udp = {}
 
 class MyUdpServer(socketserver.ThreadingUDPServer):
     conti = True
@@ -160,7 +212,8 @@ if __name__ == "__main__":
         print('udp server created ....')
 
     membership_thread = threading.Thread(target=maintain_membership, 
-                    args=('/home/ubuntu/assignment2/test.cfg',server,),
+                    #args=('/home/ubuntu/assignment2/test.cfg',server,),
+                    args=('udp',server,),
                     daemon=True)
     membership_thread.start()
 
