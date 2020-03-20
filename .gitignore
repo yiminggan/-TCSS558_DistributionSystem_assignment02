@@ -1,4 +1,5 @@
 # vscode file
+.vscode
 */.vscode
 */__pycache__
 test.cfg

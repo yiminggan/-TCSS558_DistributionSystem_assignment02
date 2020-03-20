@@ -17,62 +17,59 @@ def write_data(path, map):
 # Process the request based on its operation. 
 def operation(data, data_path, server):
     if data[0] == 'put':
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        ###### connect members with TCP ###############
-        '''
-        for i in membership_list:
-            sock.connect(i, mmebership_list[i])
-            member_msg = 'dput1'
-            sock.sendall(bytes(command + "\n", "utf-8"))
-            received = str(sock.recv(65100), "utf-8")
-        '''
-        msg = ''
+        server.dataset[data[1]] = data[2]
+        msg = data[1]
         return msg
     elif data[0] == 'get':
         try:
-            map = read_data(data_path)
-            msg = map[data[1]].encode('utf-8')
+            msg = server.dataset[data[1]]
             return msg
-            # request.sendall(map[data[1]].encode('utf-8'))
         except KeyError:
-            msg = 'Can\'t find the key {}'.format(data[1]).encode('utf-8')
+            msg = 'Can\'t find the key {}'.format(data[1])
             return msg
     elif data[0] == 'del':
         try:
-            map = read_data(data_path)
-            result = map.pop(data[1])
-            write_data(data_path, map)
-            msg = 'delete value {}'.format(result).encode('utf-8')
+            result = server.dataset.pop(data[1])
+            msg = 'delete value {}'.format(result)
             return msg
         except KeyError:
-            msg = 'Can\'t find the key {}'.format(data[1]).encode('utf-8')
+            msg = 'Can\'t find the key {}'.format(data[1])
             return msg
-        # request.sendall(msg.encode('utf-8'))
     elif data[0] == 'store':
-        # map = read_data(data_path)
-        # msg = json.dumps(map).encode('utf-8')
-        # if len(msg) >=65000:
-        #     msg = b'TRIMMED: '+msg[0:65000]
-        return json.dumps(server.members).encode('utf-8')
-        # request.sendall(msg)
+        return json.dumps(server.dataset)
     elif data[0] == 'exit':
-        # request.sendall('server shutdown'.encode('utf-8'))
-        os.remove(data_path)
-        msg = 'server shutdown'.encode('utf-8')
+        msg = 'server shutdown'
         return msg
     elif data[0] == 'dput1':
-        # implementation need
-        return None
+        if data[1] in server.lock_list:
+            return "abort"
+        else:
+            server.lock_list.append(data[1])
+            return "acknowledge"
     elif data[0] == 'dput2':
-        '''
-        lock = threading.RLock()
-        with lock:
-            # change the key/value storage
-        '''
-        return None
+        data_dput2 = data[:]
+        data_dput2[0] = "put"
+        msg = operation(data_dput2, data_path, server)
+        server.lock_list.remove(data[1])
+        return msg
     elif data[0] == 'dputabort':
-        # implementation need
-        return None
+        server.lock_list.remove(data[1])
+        return "abort"
+    elif data[0] == 'ddel1':
+        if data[1] in server.lock_list:
+            return "abort"
+        else:
+            server.lock_list.append(data[1])
+            return "acknowledge"
+    elif data[0] == 'ddel2':
+        data_ddel2 = data[:]
+        data_ddel2[0] = "del"
+        msg = operation(data_ddel2, data_path, server)
+        server.lock_list.remove(data[1])
+        return msg
+    elif data[0] == 'ddelabort':
+        server.lock_list.remove(data[1])
+        return "abort"
 
 def ConfigFile(path, server):
     while True:
@@ -86,7 +83,7 @@ def ConfigFile(path, server):
             server.members = members
         time.sleep(3)
 
-def udp_receive(send_addr):
+def udp_listen(send_addr):
     while True:
         sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         sender.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
@@ -96,24 +93,31 @@ def udp_receive(send_addr):
         sender.sendto(msg.encode('utf-8'), ('<broadcast>', 4410))
         time.sleep(0.1)
 
-def udp_check(map):
+def update_members(map):
+    members = []
+    for ip in map:
+        members.append(str(ip)+":"+str(map[ip][1]))
+    return members
+
+def udp_check(map, server):
     while True:
-        print(map)
+        #print(map)
         for ip in list(map):
-            map[ip] -= 1
-            if map[ip] == 0:
+            map[ip][0] -= 1
+            if map[ip][0] == 0:
                 map.pop(ip)
                 print('delete ip: {}'.format(ip))
+        #server.members = update_members(map)
         time.sleep(1)
 
 def UdpDiscover(send_addr, server):
-    listen_thread = threading.Thread(target=udp_receive, 
+    listen_thread = threading.Thread(target=udp_listen, 
                     args=(send_addr,),
                     daemon=True)
     listen_thread.start()
 
     check_thread = threading.Thread(target=udp_check, 
-                args=(server.members_udp,),
+                args=(server.members_udp, server),
                 daemon=True)
     check_thread.start()
     while True:
@@ -125,7 +129,11 @@ def UdpDiscover(send_addr, server):
         port, (addr, _) = addr_port
         port = int(port)
         #print("Udp receive addr: {}:{}".format(addr, port))
-        server.members_udp[addr] = 30
+        server.members_udp[addr] = []
+        server.members_udp[addr].append(30)
+        server.members_udp[addr].append(port)
+        server.members = update_members(server.members_udp)
+        print(server.members)
         time.sleep(1)
         
 def maintain_membership(com_type,server):
@@ -134,6 +142,139 @@ def maintain_membership(com_type,server):
     else:
         ConfigFile(com_type, server)
 
+# Convert data list to string
+def data_to_string(data):
+    data_string = ""
+    for i in range(len(data)):
+        if i < len(data)-1:
+            data_string = data_string + data[i] + " "
+        else:
+            data_string = data_string + data[i]
+            
+    return data_string
+    
+        
+def restore(member_index, data_abort, server):
+    # No data needs to restore if index is zero
+    if member_index == 0:
+        print("No node restored!")
+        return "No node restored!"
+    else:
+        for i in range(member_index-1):
+            addr_port = server.members[i].split(":")
+            addr = addr_port[0]
+            port = int(addr_port[1])
+            
+            if addr == server.server_address[0] and port == int(server.server_address[1]):
+                msg = operation(data_abort, data_abort, server)
+                continue
+            
+            # Connect members with TCP
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect((addr, port))
+            sock.sendall(bytes(data_to_string(data_abort) + "\n", "utf-8"))
+            
+        print("Successfully restored!")
+        return "Successfully restored!"        
+            
+# Algorithm phase one
+def phase_one(data, data_path, server):
+    data_phase_one = data[:]
+    
+    # Change operation to dput or ddel
+    if data[0] == "put":
+        data_phase_one[0] = "dput1"
+    elif data[0] == "del":
+        data_phase_one[0] = "ddel1"
+    
+    print("before phase one loop")
+    # Traverse all the members to commit the operation
+    for i in range(len(server.members)):
+        print("phase one loop {}".format(i))
+        addr_port = server.members[i].split(':')
+        addr = addr_port[0]
+        port = int(addr_port[1])
+
+        # If current member is leader itself
+        if addr == server.server_address[0] and port == int(server.server_address[1]):
+            print("phase one leader operation")
+            msg = operation(data_phase_one, data_path, server)
+            
+            # If abort, try 10 times to make sure it's true abort
+            try_cnt = 0
+            while (msg == "abort" and try_cnt < 10):
+                msg = operation(data_phase_one, data_path, server)
+                try_cnt = try_cnt + 1
+                
+            if (msg == "abort"):
+                data_abort = data[:]
+                if data[0] == "put":
+                    data_abort[0] = "dputabort"
+                elif data[0] == "del":
+                    data_abort[0] = "ddelabort"
+                
+                restore(i, data_abort, server)
+                print("phase one fail")
+                return "abort"
+        else:
+            print("phase one member operation")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect((addr, port))
+            sock.sendall(bytes(str(data_phase_one) + "\n", "utf-8"))
+            msg = str(sock.recv(1024), "utf-8")
+            
+            # If abort, try 10 times to make sure it's true abort
+            try_cnt = 0
+            while (msg == "abort" and try_cnt < 10):
+                sock.sendall(bytes(str(data_phase_one) + "\n", "utf-8"))
+                msg = str(sock.recv(1024), "utf-8")
+                try_cnt = try_cnt + 1
+                
+            if (msg == "abort"):
+                data_abort = data[:]
+                if data[0] == "put":
+                    data_abort[0] = "dputabort"
+                elif data[0] == "del":
+                    data_abort[0] = "ddelabort"
+                
+                restore(i, data_abort, server)
+                print("phase one fail")
+                return "abort"
+            
+    print("phase one success")
+    return "phase one success"
+        
+# Algorithm phase two
+def phase_two(data, data_path, server):
+    data_phase_two = data[:]
+    
+    # Change operation to dput or ddel
+    if data[0] == "put":
+        data_phase_two[0] = "dput2"
+    elif data[0] == "del":
+        data_phase_two[0] = "ddel2"
+    
+    print("before phase two loop")
+    # Traverse all the members to commit the operation
+    for i in range(len(server.members)):
+        print("phase two loop {}".format(i))
+        addr_port = server.members[i].split(':')
+        addr = addr_port[0]
+        port = int(addr_port[1])
+        
+        # If current member is leader itself
+        if addr == server.server_address[0] and port == int(server.server_address[1]):
+            print("phase two leader operation")
+            msg = operation(data_phase_two, data_path, server)
+        else:
+            print("phase two member operation")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect((addr, port))
+            sock.sendall(bytes(data_to_string(data_phase_two) + "\n", "utf-8"))
+            msg = str(sock.recv(1024), "utf-8")
+           
+    print("phase two success") 
+    return msg
 
 # Handler classes for TCP and UDP
 class MyTCPHandler(socketserver.BaseRequestHandler):
@@ -148,14 +289,26 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
         self.data = self.request.recv(1024).strip()
         print("{} wrote:".format(self.client_address[0]))
         print(self.data)
-
+        
         data = self.data.decode("utf-8")
         data = data.split(' ')
-        msg = operation(data, self.data_path, self.server)
-        self.request.sendall(msg)
-        if msg.decode('utf-8') == 'server shutdown':
+        data_path = self.data_path
+        server = self.server
+        
+        if data[0] == "put" or data[0] == "del":
+            # Elect a leader here
+            msg_phase_one = phase_one(data, data_path, server)
+            if msg_phase_one == "abort":
+                msg = "Request abort!"
+            elif msg_phase_one == "phase one success":
+                msg_phase_two = phase_two(data, data_path, server)
+                msg = msg_phase_two
+        else:
+            msg = operation(data, data_path, server)
+            
+        self.request.sendall(bytes(msg + "\n", "utf-8"))
+        if msg == 'server shutdown':
             os.system('kill %d'%os.getpid())
-
 
 class MyUDPHandler(socketserver.BaseRequestHandler):
     def __init__(self, request, client_address, server):
@@ -183,6 +336,8 @@ class MyTcpServer(socketserver.ThreadingTCPServer):
     def __init__(self, server_addr, Handler):
         socketserver.TCPServer.__init__(self, server_addr, Handler)
         self.members = []
+        self.lock_list = []
+        self.dataset = {}
         self.members_udp = {}
 
 class MyUdpServer(socketserver.ThreadingUDPServer):
